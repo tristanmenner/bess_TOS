@@ -1,0 +1,7 @@
+# BESS TOS dependencies - deliberately minimal.
+# The optimisation is a pure LP solved by the HiGHS solver bundled with SciPy,
+# so no separate MILP modelling library is required.
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+matplotlib>=3.6
