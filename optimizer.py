@@ -4,14 +4,14 @@ Mathematical formulation
 ------------------------
 Index intervals ``t = 0 .. T-1``. Decision variables, per interval:
 
-* ``c[t] >= 0``  grid/meter-side charging power (kW)
-* ``d[t] >= 0``  grid/meter-side discharging power (kW)
+* ``c[t] >= 0``  meter-side charging power (kW)
+* ``d[t] >= 0``  meter-side discharging power (kW)
 * ``y[t] in {0,1}``  operating-mode binary: 1 = charging, 0 = discharging/idle
 * ``E[k] >= 0``  battery-side stored energy (kWh) at interval boundary ``k``
 
 Energy conventions (documented once, used consistently):
 
-* ``charge_power`` / ``discharge_power`` are **grid-side** quantities. The
+* ``charge_power`` / ``discharge_power`` are **meter-side** quantities. The
   settlement meter sees ``c[t]`` imported and ``d[t]`` exported.
 * ``E`` is **battery-side** stored energy.
 * ``charge_efficiency`` (eta_c) applies grid -> battery; ``discharge_efficiency``
@@ -28,15 +28,28 @@ Objective (maximise net meter-side revenue):
 
 Constraints:
 
-* ``0 <= c[t] <= P_charge_max``, ``0 <= d[t] <= P_discharge_max``
+* ``0 <= c[t] <= P_charge_eff``, ``0 <= d[t] <= P_discharge_eff`` where the
+  limits are the **meter-side** equivalents of the battery/DC-side C-rate and
+  cable-current ratings, tightened by the AC grid connection:
+  ``P_charge_max = P_dc_charge / eta_c`` and
+  ``P_discharge_max = P_dc_discharge * eta_d`` keep the battery-side current
+  within ``min(C-rate * Ah, MAX_CURRENT_A)`` in both directions;
+  ``P_charge_eff = min(P_charge_max, grid_import_limit_kw)`` and
+  ``P_discharge_eff = min(P_discharge_max, grid_export_limit_kw)`` then apply
+  the connection capacity (phases x per-phase current x phase voltage) and any
+  static ``MAX_IMPORT_KW`` / ``MAX_EXPORT_KW`` cap.  With no site load or
+  generation modelled, these bounds are exactly the net meter-flow caps
+  (charge = import, discharge = export).
 * ``E_min <= E[k] <= E_max``
 * ``E[0] = initial energy``
 * terminal SOC: ``E[T] = E[0]`` (equal_initial) or free within limits
 * no simultaneous charge/discharge, enforced by binaries:
   ``c[t] <= P_charge_max * y[t]`` and ``d[t] <= P_discharge_max * (1 - y[t])``
-* Mode 1 only: for each calendar day ``D``,
-  ``sum_{t in D} (dt / eta_d) * d[t] <= CYCLES_PER_DAY * usable_energy``
-  (battery-side discharge throughput, i.e. Equivalent Full Cycles).
+* Mode 1 only: for each day ``D``,
+  ``sum_{t in D} (coeff_c * c[t] + coeff_d * d[t]) <= CYCLES_PER_DAY * usable_energy``
+  where the coefficients implement ``Config.MODE1_CYCLE_BASIS`` (battery-side
+  discharge by default, i.e. Equivalent Full Cycles) and the day definition is
+  ``Config.DAY_BASIS`` (calendar day by default).
 
 Why binaries are genuinely required (and an LP is NOT sufficient)
 -----------------------------------------------------------------
@@ -51,11 +64,14 @@ When ``price > 0`` the change is negative, so simultaneity is unprofitable.
 But when ``price < 0`` the change is *positive*: the LP is paid to route energy
 through the round-trip losses, importing power while holding SOC constant.
 That is not physically realisable through a single AC port. The binaries remove
-it. (The LP therefore supplies an optimistic upper bound; the MILP is the
-physically correct benchmark.)
+it.
 
-Solver: HiGHS via ``scipy.optimize.milp``. HiGHS certifies proven global
-optimality for the MILP (subject to MIP gap), which is reported per run.
+Solver: HiGHS via ``scipy.optimize.milp``. ``Config.MIP_REL_GAP`` defaults to
+1e-4 (the HiGHS default); the achieved gap and dual bound are always reported,
+and the run only claims optimality when the achieved gap meets the target. Set
+``MIP_REL_GAP = 0`` to prove exact optimality (tractable for small packs).
+``solve_lp_bound`` returns the LP relaxation value, which is an independent
+upper bound on the physical optimum (the MILP objective must not exceed it).
 """
 
 from __future__ import annotations
@@ -68,11 +84,10 @@ import pandas as pd
 from scipy import sparse
 from scipy.optimize import Bounds, LinearConstraint, linprog, milp
 
-from config import Config
+from config import POWER_TOL_KW, Config
 
 SOLVER_LP = "scipy.optimize.linprog / HiGHS (LP relaxation, upper bound)"
 SOLVER_MILP = "scipy.optimize.milp / HiGHS (MILP, no-simultaneity enforced)"
-POWER_TOL = 1e-7  # kW; anything below this is treated as zero flow
 
 
 @dataclass
@@ -111,8 +126,17 @@ def _build_daily_groups(day_index: np.ndarray) -> list[np.ndarray]:
     return np.split(order, boundaries)
 
 
-def _build_model(config: Config, price_kwh: np.ndarray, day_index: np.ndarray) -> _Model:
-    """Assemble the (MI)LP matrices. Shared by the LP and MILP paths."""
+def _build_model(
+    config: Config,
+    price_kwh: np.ndarray,
+    day_index: np.ndarray,
+    enforce_no_simultaneous: bool | None = None,
+) -> _Model:
+    """Assemble the (MI)LP matrices. Shared by the LP and MILP paths.
+
+    ``enforce_no_simultaneous`` overrides ``Config.ENFORCE_NO_SIMULTANEOUS``;
+    passing ``False`` builds the LP relaxation used as the optimality bound.
+    """
     price_kwh = np.asarray(price_kwh, dtype=float)
     day_index = np.asarray(day_index)
     T = price_kwh.size
@@ -124,13 +148,17 @@ def _build_model(config: Config, price_kwh: np.ndarray, day_index: np.ndarray) -
     dt = config.interval_hours
     eta_c = config.charge_efficiency
     eta_d = config.discharge_efficiency
-    p_charge = config.max_charge_power_kw
-    p_discharge = config.max_discharge_power_kw
+    p_charge = config.effective_charge_power_kw
+    p_discharge = config.effective_discharge_power_kw
     e_min = config.min_energy_kwh
     e_max = config.max_energy_kwh
     e_init = config.initial_energy_kwh
 
-    use_binaries = bool(config.ENFORCE_NO_SIMULTANEOUS)
+    use_binaries = bool(
+        config.ENFORCE_NO_SIMULTANEOUS
+        if enforce_no_simultaneous is None
+        else enforce_no_simultaneous
+    )
     c0, d0, e0 = 0, T, 2 * T
     y0 = 3 * T + 1
     n = (4 * T + 1) if use_binaries else (3 * T + 1)
@@ -156,8 +184,13 @@ def _build_model(config: Config, price_kwh: np.ndarray, day_index: np.ndarray) -
     if config.MODE == 1:
         groups = _build_daily_groups(day_index)
         A_cyc = sparse.lil_matrix((len(groups), n))
+        coeff_c = config.mode1_cycle_coeff_c
+        coeff_d = config.mode1_cycle_coeff_d
         for r, idx_day in enumerate(groups):
-            A_cyc[r, d0 + idx_day] = dt / eta_d  # battery-side discharge kWh
+            if coeff_c:
+                A_cyc[r, c0 + idx_day] = coeff_c
+            if coeff_d:
+                A_cyc[r, d0 + idx_day] = coeff_d
         ub_rows.append(A_cyc.tocsr())
         ub_rhs.append(np.full(len(groups), config.CYCLES_PER_DAY * config.usable_energy_kwh))
     if use_binaries:
@@ -209,15 +242,44 @@ def solve_schedule(config: Config, price_kwh: np.ndarray, day_index: np.ndarray)
     return _solve_lp(config, price_kwh, model)
 
 
-def _extract(config: Config, price_kwh: np.ndarray, model: _Model, x: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
-    dt = config.interval_hours
-    c = np.clip(x[model.c0 : model.c0 + model.T], 0.0, config.max_charge_power_kw)
-    d = np.clip(x[model.d0 : model.d0 + model.T], 0.0, config.max_discharge_power_kw)
-    e = x[model.e0 : model.e0 + model.T + 1]
-    n_fixed = 0
-    if not config.ENFORCE_NO_SIMULTANEOUS:
-        c, d, n_fixed = canonicalise_schedule(config, c, d)
-    return c, d, e, n_fixed
+def solve_lp_bound(config: Config, price_kwh: np.ndarray, day_index: np.ndarray) -> float:
+    """LP relaxation revenue bound (>= physical optimum), as an independent check."""
+    model = _build_model(config, price_kwh, day_index, enforce_no_simultaneous=False)
+    res = linprog(
+        c=model.obj,
+        A_ub=model.A_ub,
+        b_ub=model.b_ub,
+        A_eq=model.A_eq,
+        b_eq=model.b_eq,
+        bounds=list(zip(model.lb, model.ub)),
+        method="highs",
+    )
+    if not res.success:
+        raise RuntimeError(f"LP relaxation failed (status={res.status}): {res.message}")
+    return float(-res.fun)
+
+
+def _extract(
+    config: Config, model: _Model, x: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    """Slice the solver vector and record any bound violation before clipping."""
+    c_raw = np.asarray(x[model.c0 : model.c0 + model.T], dtype=float)
+    d_raw = np.asarray(x[model.d0 : model.d0 + model.T], dtype=float)
+    p_charge = config.effective_charge_power_kw
+    p_discharge = config.effective_discharge_power_kw
+    violation = 0.0
+    if c_raw.size:
+        violation = max(
+            violation,
+            float(max(0.0, -c_raw.min())),
+            float(max(0.0, (c_raw - p_charge).max())),
+            float(max(0.0, -d_raw.min())),
+            float(max(0.0, (d_raw - p_discharge).max())),
+        )
+    c = np.clip(c_raw, 0.0, p_charge)
+    d = np.clip(d_raw, 0.0, p_discharge)
+    e = np.asarray(x[model.e0 : model.e0 + model.T + 1], dtype=float)
+    return c, d, e, violation
 
 
 def _solve_milp(config: Config, price_kwh: np.ndarray, model: _Model) -> SolveResult:
@@ -225,19 +287,34 @@ def _solve_milp(config: Config, price_kwh: np.ndarray, model: _Model) -> SolveRe
     lb = np.concatenate([model.b_eq, -np.inf * np.ones(model.A_ub.shape[0])]) if model.A_ub is not None else model.b_eq
     ub = np.concatenate([model.b_eq, model.b_ub]) if model.A_ub is not None else model.b_eq
 
+    options: dict = {"mip_rel_gap": float(config.MIP_REL_GAP)}
+    if config.MIP_TIME_LIMIT_S is not None:
+        options["time_limit"] = float(config.MIP_TIME_LIMIT_S)
+
     t0 = time.perf_counter()
     res = milp(
         c=model.obj,
         integrality=model.integrality,
         bounds=Bounds(model.lb, model.ub),
         constraints=LinearConstraint(A, lb, ub),
+        options=options,
     )
     runtime = time.perf_counter() - t0
-    if not res.success:
+    has_solution = getattr(res, "x", None) is not None
+    if not res.success and not has_solution:
         raise RuntimeError(f"MILP failed (status={res.status}): {res.message}")
+    limit_reached = not bool(res.success)
 
-    c, d, e, n_fixed = _extract(config, price_kwh, model, res.x)
-    diag = _diagnostics(config, SOLVER_MILP, res.status, res.message, res.fun, runtime, model, n_fixed, price_kwh, c, d)
+    c, d, e, violation = _extract(config, model, res.x)
+    gap = getattr(res, "mip_gap", None)
+    diag = _diagnostics(
+        config, SOLVER_MILP, res.status, res.message, res.fun, runtime, model,
+        price_kwh, c, d, violation,
+        mip_gap=None if gap is None else float(gap),
+        mip_dual_bound=getattr(res, "mip_dual_bound", None),
+        mip_nodes=getattr(res, "mip_node_count", None),
+        limit_reached=limit_reached,
+    )
     return SolveResult(c, d, e[:-1], e[1:], diag)
 
 
@@ -256,21 +333,34 @@ def _solve_lp(config: Config, price_kwh: np.ndarray, model: _Model) -> SolveResu
     if not res.success:
         raise RuntimeError(f"LP failed (status={res.status}): {res.message}")
 
-    c, d, e, n_fixed = _extract(config, price_kwh, model, res.x)
-    diag = _diagnostics(config, SOLVER_LP, res.status, res.message, res.fun, runtime, model, n_fixed, price_kwh, c, d)
+    c, d, e, violation = _extract(config, model, res.x)
+    diag = _diagnostics(
+        config, SOLVER_LP, res.status, res.message, res.fun, runtime, model,
+        price_kwh, c, d, violation,
+        mip_gap=None, mip_dual_bound=None, mip_nodes=None,
+    )
     return SolveResult(c, d, e[:-1], e[1:], diag)
 
 
 def _diagnostics(
-    config, solver, status, message, objective, runtime, model, n_fixed, price_kwh, c, d
+    config, solver, status, message, objective, runtime, model, price_kwh, c, d,
+    max_bound_violation_kw=0.0, mip_gap=None, mip_dual_bound=None, mip_nodes=None,
+    limit_reached=False,
 ) -> dict:
     dt = config.interval_hours
     total_revenue = float(np.sum(dt * price_kwh * (d - c)))
+    simultaneous = int(np.sum((c > POWER_TOL_KW) & (d > POWER_TOL_KW)))
+    if solver == SOLVER_MILP:
+        gap_tol = max(float(config.MIP_REL_GAP), 1e-9)
+        proven = bool(status == 0 and (mip_gap is None or float(mip_gap) <= gap_tol * 1.000001))
+    else:
+        proven = False
     return {
         "solver": solver,
         "solver_status": int(status),
         "solver_message": str(message),
-        "globally_optimal": bool(status == 0),
+        "limit_reached": bool(limit_reached),
+        "globally_optimal": proven,
         "objective_value": float(objective),
         "total_revenue": total_revenue,
         "runtime_seconds": runtime,
@@ -279,12 +369,36 @@ def _diagnostics(
         "n_equality_constraints": int(model.T),
         "n_inequality_constraints": 0 if model.A_ub is None else int(model.A_ub.shape[0]),
         "n_binary_variables": int(model.integrality.sum()) if model.integrality is not None else 0,
-        "simultaneous_intervals_canonicalised": int(n_fixed),
+        "mip_rel_gap_requested": float(config.MIP_REL_GAP),
+        "mip_gap": mip_gap,
+        "mip_dual_bound": None if mip_dual_bound is None else float(mip_dual_bound),
+        "mip_nodes": None if mip_nodes is None else int(mip_nodes),
+        "lp_bound_revenue": None,
+        "bound_gap_absolute": None,
+        "simultaneous_intervals": simultaneous,
+        "max_power_bound_violation_kw": float(max_bound_violation_kw),
         "mode": config.MODE,
+        "mode1_cycle_basis": config.MODE1_CYCLE_BASIS,
+        "mode1_cycle_basis_label": config.mode1_cycle_basis_label,
+        "day_basis": config.DAY_BASIS,
         "terminal_soc_mode": config.TERMINAL_SOC_MODE,
         "no_simultaneous_enforced": bool(config.ENFORCE_NO_SIMULTANEOUS),
         "max_charge_power_kw": config.max_charge_power_kw,
         "max_discharge_power_kw": config.max_discharge_power_kw,
+        "connection_power_kw": config.connection_power_kw,
+        "phases": config.PHASES,
+        "max_current_a_per_phase": config.MAX_CURRENT_A_PER_PHASE,
+        "nominal_ac_voltage_per_phase_v": config.NOMINAL_AC_VOLTAGE_PER_PHASE_V,
+        "max_export_kw": config.MAX_EXPORT_KW,
+        "max_import_kw": config.MAX_IMPORT_KW,
+        "grid_import_limit_kw": config.grid_import_limit_kw,
+        "grid_export_limit_kw": config.grid_export_limit_kw,
+        "effective_charge_power_kw": config.effective_charge_power_kw,
+        "effective_discharge_power_kw": config.effective_discharge_power_kw,
+        "charge_limited_by_grid": bool(config.charge_limited_by_grid),
+        "discharge_limited_by_grid": bool(config.discharge_limited_by_grid),
+        "dc_charge_power_kw": config.dc_charge_power_kw,
+        "dc_discharge_power_kw": config.dc_discharge_power_kw,
         "max_charge_current_a": config.max_charge_current_a,
         "max_discharge_current_a": config.max_discharge_current_a,
         "charge_current_limited_by_cable": bool(config.charge_current_limited_by_cable),
@@ -295,16 +409,18 @@ def _diagnostics(
 def canonicalise_schedule(
     config: Config, c: np.ndarray, d: np.ndarray, tol: float = 1e-6
 ) -> tuple[np.ndarray, np.ndarray, int]:
-    """Remove simultaneous charge/discharge (LP path only).
+    """Remove simultaneous charge/discharge from a relaxation solution.
 
     Reduces ``c`` by ``delta`` and ``d`` by ``eta_c*eta_d*delta`` so the SOC
-    change is unchanged. This may *reduce* revenue at negative prices (the LP
-    loophole), which is why the MILP is the default and correct model.
+    change is unchanged.  This produces a *feasible but generally sub-optimal*
+    physical schedule; it is NOT an upper bound and is therefore not applied to
+    the LP path by default (see the README).  Kept as an explicit utility for
+    users who want to post-process a relaxation solution.
     """
     eta_c = config.charge_efficiency
     eta_d = config.discharge_efficiency
-    c = c.copy()
-    d = d.copy()
+    c = np.array(c, dtype=float, copy=True)
+    d = np.array(d, dtype=float, copy=True)
     n_fixed = 0
     for t in np.flatnonzero((c > tol) & (d > tol)):
         delta = min(c[t], d[t] / (eta_c * eta_d))
@@ -340,7 +456,11 @@ def build_schedule_frame(
 
     soc_end = result.soc_end_kwh
     soc_percent = soc_end / config.BATTERY_CAPACITY_KWH * 100.0
-    state = np.where(c > POWER_TOL, "charge", np.where(d > POWER_TOL, "discharge", "idle"))
+    state = np.where(
+        (c > POWER_TOL_KW) & (d > POWER_TOL_KW),
+        "simultaneous",
+        np.where(c > POWER_TOL_KW, "charge", np.where(d > POWER_TOL_KW, "discharge", "idle")),
+    )
     efc = np.cumsum(battery_discharge) / config.usable_energy_kwh
 
     return pd.DataFrame(
@@ -376,6 +496,7 @@ __all__ = [
     "SOLVER_MILP",
     "SolveResult",
     "solve_schedule",
+    "solve_lp_bound",
     "canonicalise_schedule",
     "build_schedule_frame",
 ]

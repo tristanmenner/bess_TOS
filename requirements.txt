@@ -1,6 +1,8 @@
 # BESS TOS dependencies - deliberately minimal.
-# The optimisation is a pure LP solved by the HiGHS solver bundled with SciPy,
-# so no separate MILP modelling library is required.
+# The optimisation is a mixed-integer LP (MILP) with per-interval binaries to
+# block non-physical simultaneous charge/discharge; it is solved by the HiGHS
+# solver bundled with SciPy (scipy.optimize.milp), so no separate MILP
+# modelling library is required.
 pandas>=2.0
 numpy>=1.24
 scipy>=1.10

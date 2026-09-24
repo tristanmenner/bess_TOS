@@ -7,27 +7,39 @@ CONFIGURATION
   start date                 : 2026-08-01 (inclusive)
   end date                   : 2026-08-31 (inclusive)
   optimisation mode          : 2  (Mode 2 - unconstrained timing (free arbitrage))
-  battery capacity           : 29.10 kWh
-  usable capacity            : 28.81 kWh
-  min / max SOC              : 1.00% / 100.00%
+  battery capacity           : 119.00 kWh
+  usable capacity            : 107.10 kWh
+  min / max SOC              : 0.00% / 90.00%
   initial SOC                : 50.00%
-  final SOC                  : 50.00% (ends), range 1.00%-100.00%
-  nominal voltage            : 48.50 V
-  nominal capacity           : 600.00 Ah (= 29.100 kWh)
-  charge C-rate              : 0.500C  (300.0 A)
-  discharge C-rate           : 1.000C  (600.0 A)
-  cable current limit        : 100.0 A
-  effective charge current   : 100.0 A  (cable-limited)
-  effective discharge current: 100.0 A  (cable-limited)
-  max charge power           : 4.85 kW
-  max discharge power        : 4.85 kW
+  final SOC                  : 50.00% (ends), range -0.00%-90.00%
+  nominal voltage            : 743.60 V
+  nominal capacity           : 160.00 Ah (= 118.976 kWh)
+  charge C-rate              : 0.500C  (80.0 A)
+  discharge C-rate           : 1.000C  (160.0 A)
+  cable current limit        : 200.0 A
+  effective charge current   : 80.0 A  (C-rate-limited)
+  effective discharge current: 160.0 A  (C-rate-limited)
+  DC charge power rating     : 59.49 kW (battery side)
+  DC discharge power rating  : 118.98 kW (battery side)
+  meter-side charge limit    : 62.71 kW (= DC rating / eta_c)
+  meter-side discharge limit : 112.87 kW (= DC rating x eta_d)
+  grid connection            : 3-phase, 100.0 A/phase, 230.0 V/phase
+  connection capacity        : 69.00 kW (= phases x A/phase x V/phase)
+  static export cap          : none (connection capacity)
+  static import cap          : none (connection capacity)
+  effective charge limit     : 62.71 kW (battery/converter-limited)
+  effective discharge limit  : 69.00 kW (connection-limited)
   round-trip efficiency      : 0.9000
   charge / discharge eff.    : 0.948683 / 0.948683 (symmetric sqrt split)
   terminal SOC mode          : equal_initial
+  day basis                  : calendar
   cycle constraint           : none (free timing)
   interval                   : 5 min = 0.083333 h
+  no-simultaneity enforced   : True
+  MILP relative gap target    : 0.0001
+  require full data coverage : True
 
-DATA
+DATA (independent of the optimiser)
   files discovered          : 1
   rows read (raw)           : 44640
   rows after cleaning       : 44640
@@ -36,59 +48,85 @@ DATA
   duplicate timestamps      : 0
   missing prices            : 0
   invalid (non-numeric)     : 0
-  missing 5-min intervals   : 0
+  expected intervals        : 8,928
+  covered intervals         : 8,928  (100.0000%)
+  missing 5-min intervals   : 0  (head 0, tail 0)
+  coverage                  : 2026-08-01 00:05:00 -> 2026-09-01 00:00:00
+  MMS header interval       : 5 min
+  sha256(PUBLIC_ARCHIVE#DISPATCHPRICE#FILE01#202608010000.CSV) : 59a1adad375ea564a78541d6f7faf710c5cef86cc7a4b3dd2dbd8a6eb95abef4
 
 PERFORMANCE
-  total gross discharge revenue : $116.2378
-  total charging cost           : $43.4420
-  total net revenue             : $72.7958
-  total energy charged (grid)   : 1,484.4353 kWh
-  total energy discharged (grid): 1,335.9918 kWh
-  total battery throughput      : 1,408.2590 kWh
-  equivalent full cycles        : 48.8826 EFC
-  average SOC                   : 44.463%
-  minimum SOC reached           : 1.000%
-  maximum SOC reached           : 100.000%
-  number of charge events       : 678
-  number of discharge events    : 684
-  average charge duration       : 27.4 min
-  average discharge duration    : 24.4 min
-  longest charge duration       : 375.0 min
-  longest discharge duration    : 335.0 min
-  max single-interval revenue   : $0.1641
-  min single-interval revenue   : $-0.0584
+  total gross discharge revenue : $972.1739
+  total charging cost           : $487.9851
+  total net revenue             : $484.1888
+  total energy charged (grid)   : 15,207.4209 kWh
+  total energy discharged (grid): 13,686.6788 kWh
+  battery throughput charged    : 14,427.0262 kWh
+  battery throughput discharged : 14,427.0262 kWh
+  equivalent full cycles        : 134.7061 EFC
+  average SOC                   : 37.281%
+  minimum SOC reached           : -0.000%
+  maximum SOC reached           : 90.000%
+  number of charge events       : 1169
+  number of discharge events    : 1178
+  average charge duration       : 13.0 min
+  average discharge duration    : 10.5 min
+  longest charge duration       : 105.0 min
+  longest discharge duration    : 90.0 min
+  max single-interval revenue   : $2.3345
+  min single-interval revenue   : $-0.9456
 
 MONTHLY GRID ENERGY USAGE (for retailer access-tier selection)
-  total energy imported (grid)  : 1,484.44 kWh
-  total energy exported (grid)  : 1,335.99 kWh
-  net grid energy balance       : 148.44 kWh
-  average daily import          : 47.89 kWh
-  highest daily import          : 62.57 kWh
+  total energy imported (grid)  : 15,207.42 kWh
+  total energy exported (grid)  : 13,686.68 kWh
+  net grid energy balance       : 1,520.74 kWh
+  average daily import          : 490.56 kWh
+  highest daily import          : 703.17 kWh
+
+RETAIL SUBSCRIPTION (Amber Electric - break-even reference)
+  grid import (period)          : 15,207.42 kWh over 31.00 days
+  annualised usage (estimate)   : 179,178 kWh/yr
+  usage tier                    : over 100,000 kWh/yr -> $350.00/month
+  subscription cost (period)    : $350.00 (1 monthly fee)
+  (overlay only: not deducted from the revenue totals; annualising
+   the modelled period is an estimate, not a billed amount)
 
 DAILY PERFORMANCE
-  calendar days in period       : 31
-  average daily revenue         : $2.3483
-  median daily revenue          : $2.2828
-  highest calendar day          : 2026-08-27  $6.4670
-  lowest calendar day           : 2026-08-18  $0.7194
-  max rolling 24-hour revenue   : $7.2681
-  min rolling 24-hour revenue   : $-0.0287
-  (calendar day = midnight-to-midnight NEM time; rolling 24h = any 288 consecutive intervals)
+  days in period                : 31
+  intervals per full day        : 288
+  partial days                  : 0
+  average daily revenue         : $15.6190
+  median daily revenue          : $14.7023
+  highest day                   : 2026-08-27  $40.9980
+  lowest day                    : 2026-08-08  $6.3509
+  max rolling 24-hour revenue   : $46.0703
+  min rolling 24-hour revenue   : $3.1231
+  (day basis = calendar; rolling 24h = 288 consecutive intervals)
 
 OPTIMISATION DIAGNOSTICS
   solver                        : scipy.optimize.milp / HiGHS (MILP, no-simultaneity enforced)
   solver status                 : 0 (Optimization terminated successfully. (HiGHS Status 7: Optimal))
-  objective value               : $-72.795769
-  optimiser runtime             : 7.421 s
+  objective value               : $-484.188798
+  optimiser runtime             : 21.729 s
   number of intervals           : 8928
   number of variables           : 35713
   equality constraints          : 8928
   inequality constraints        : 17856
   binary variables              : 8928
   no-simultaneity enforced      : True
-  simultaneous fix-ups          : 0
+  simultaneous intervals        : 0
+  max power-bound violation     : 1.712e-12 kW
   missing intervals             : 0
-  globally optimal              : True
+  optimality proven (gap<=target): True
+  MIP gap (HiGHS report)        : 0.000017
+  MIP dual bound (objective)    : -484.197024
+  branch-and-bound nodes        : 1
   constraint violations         : 0
   independent validation        : PASSED
+
+OPTIMALITY CERTIFICATE
+  MILP objective (this run)     : $484.188798
+  LP relaxation upper bound     : $484.510005
+  MILP gap vs LP bound          : $0.321207  (0.066295%)
+  bound check                   : PASSED (MILP <= LP bound)
 ==============================================================================

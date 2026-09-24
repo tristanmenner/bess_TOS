@@ -23,6 +23,7 @@ COLOR_REVENUE = "#6a51a3"
 COLOR_IMPORT = "#1f77b4"
 COLOR_EXPORT = "#31a354"
 COLOR_NET = "#756bb1"
+COLOR_BREAK_EVEN = "#d62728"
 
 
 def plot_dashboard(
@@ -30,13 +31,15 @@ def plot_dashboard(
     config: Config,
     path: Path | str,
     title: str | None = None,
+    break_even_cost: float | None = None,
+    break_even_label: str | None = None,
 ) -> Path:
     """Render the four-panel diagnostic plot and save it.
 
     Panel 1  settlement price ($/MWh)
     Panel 2  battery SOC (%)
     Panel 3  charge/discharge power (kW, charge shown negative)
-    Panel 4  cumulative net revenue ($)
+    Panel 4  cumulative net revenue ($), with an optional break-even line
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -89,8 +92,17 @@ def plot_dashboard(
 
     # ---- Panel 4: cumulative revenue --------------------------------------
     ax = axes[3]
-    ax.plot(ts, revenue, color=COLOR_REVENUE, linewidth=1.1)
+    ax.plot(ts, revenue, color=COLOR_REVENUE, linewidth=1.1, label="cumulative revenue")
     ax.fill_between(ts, 0, revenue, color=COLOR_REVENUE, alpha=0.15)
+    if break_even_cost is not None:
+        ax.axhline(
+            break_even_cost,
+            color=COLOR_BREAK_EVEN,
+            linestyle="--",
+            linewidth=1.2,
+            label=break_even_label or f"break-even: ${break_even_cost:,.2f}",
+        )
+        ax.legend(loc="upper left", fontsize=8)
     ax.set_ylabel("Cumulative revenue ($)")
     ax.set_xlabel("Time (NEM time, AEST / UTC+10; interval ending)")
     ax.grid(alpha=0.25)
@@ -109,15 +121,38 @@ def plot_dashboard(
 
 
 def plot_cumulative_revenue(
-    frame: pd.DataFrame, config: Config, path: Path | str
+    frame: pd.DataFrame,
+    config: Config,
+    path: Path | str,
+    break_even_cost: float | None = None,
+    break_even_label: str | None = None,
 ) -> Path:
-    """Standalone cumulative-revenue chart (the primary benchmark visual)."""
+    """Standalone cumulative-revenue chart (the primary benchmark visual).
+
+    ``break_even_cost`` draws a horizontal red line at the retail subscription
+    cost for the modelled period (see ``reporting.amber_subscription_estimate``).
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     ts = pd.to_datetime(frame["timestamp"])
     fig, ax = plt.subplots(figsize=(15, 5))
-    ax.plot(ts, frame["cumulative_revenue"], color=COLOR_REVENUE, linewidth=1.2)
+    ax.plot(
+        ts,
+        frame["cumulative_revenue"],
+        color=COLOR_REVENUE,
+        linewidth=1.2,
+        label="cumulative revenue",
+    )
     ax.fill_between(ts, 0, frame["cumulative_revenue"], color=COLOR_REVENUE, alpha=0.15)
+    if break_even_cost is not None:
+        ax.axhline(
+            break_even_cost,
+            color=COLOR_BREAK_EVEN,
+            linestyle="--",
+            linewidth=1.2,
+            label=break_even_label or f"break-even: ${break_even_cost:,.2f}",
+        )
+        ax.legend(loc="upper left", fontsize=9)
     ax.set_title(
         f"{config.REGION} BESS TOS cumulative revenue (Mode {config.MODE}, "
         f"perfect hindsight)"

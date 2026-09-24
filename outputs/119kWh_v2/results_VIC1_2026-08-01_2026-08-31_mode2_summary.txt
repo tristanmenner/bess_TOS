@@ -1,0 +1,118 @@
+==============================================================================
+BESS THEORETICALLY OPTIMAL STRATEGY (TOS) - Mode 2 - unconstrained timing (free arbitrage)
+Perfect-hindsight benchmark: NOT deployable trading logic.
+==============================================================================
+CONFIGURATION
+  region                     : VIC1
+  start date                 : 2026-08-01 (inclusive)
+  end date                   : 2026-08-31 (inclusive)
+  optimisation mode          : 2  (Mode 2 - unconstrained timing (free arbitrage))
+  battery capacity           : 29.10 kWh
+  usable capacity            : 28.81 kWh
+  min / max SOC              : 1.00% / 100.00%
+  initial SOC                : 50.00%
+  final SOC                  : 50.00% (ends), range 1.00%-100.00%
+  nominal voltage            : 48.50 V
+  nominal capacity           : 600.00 Ah (= 29.100 kWh)
+  charge C-rate              : 0.500C  (300.0 A)
+  discharge C-rate           : 1.000C  (600.0 A)
+  cable current limit        : 100.0 A
+  effective charge current   : 100.0 A  (cable-limited)
+  effective discharge current: 100.0 A  (cable-limited)
+  DC charge power rating     : 4.85 kW (battery side)
+  DC discharge power rating  : 4.85 kW (battery side)
+  meter-side charge limit    : 5.11 kW (= DC rating / eta_c)
+  meter-side discharge limit : 4.60 kW (= DC rating x eta_d)
+  round-trip efficiency      : 0.9000
+  charge / discharge eff.    : 0.948683 / 0.948683 (symmetric sqrt split)
+  terminal SOC mode          : equal_initial
+  day basis                  : calendar
+  cycle constraint           : none (free timing)
+  interval                   : 5 min = 0.083333 h
+  no-simultaneity enforced   : True
+  MILP relative gap target    : 0.0001
+  require full data coverage : True
+
+DATA (independent of the optimiser)
+  files discovered          : 1
+  rows read (raw)           : 44640
+  rows after cleaning       : 44640
+  regions available         : NSW1, QLD1, SA1, TAS1, VIC1
+  unparseable timestamps    : 0
+  duplicate timestamps      : 0
+  missing prices            : 0
+  invalid (non-numeric)     : 0
+  expected intervals        : 8,928
+  covered intervals         : 8,928  (100.0000%)
+  missing 5-min intervals   : 0  (head 0, tail 0)
+  coverage                  : 2026-08-01 00:05:00 -> 2026-09-01 00:00:00
+  MMS header interval       : 5 min
+  sha256(PUBLIC_ARCHIVE#DISPATCHPRICE#FILE01#202608010000.CSV) : 59a1adad375ea564a78541d6f7faf710c5cef86cc7a4b3dd2dbd8a6eb95abef4
+
+PERFORMANCE
+  total gross discharge revenue : $115.2527
+  total charging cost           : $42.5013
+  total net revenue             : $72.7514
+  total energy charged (grid)   : 1,497.3047 kWh
+  total energy discharged (grid): 1,347.5743 kWh
+  battery throughput charged    : 1,420.4680 kWh
+  battery throughput discharged : 1,420.4680 kWh
+  equivalent full cycles        : 49.3064 EFC
+  average SOC                   : 44.319%
+  minimum SOC reached           : 1.000%
+  maximum SOC reached           : 100.000%
+  number of charge events       : 676
+  number of discharge events    : 702
+  average charge duration       : 26.0 min
+  average discharge duration    : 25.2 min
+  longest charge duration       : 350.0 min
+  longest discharge duration    : 360.0 min
+  max single-interval revenue   : $0.1557
+  min single-interval revenue   : $-0.0605
+
+MONTHLY GRID ENERGY USAGE (for retailer access-tier selection)
+  total energy imported (grid)  : 1,497.30 kWh
+  total energy exported (grid)  : 1,347.57 kWh
+  net grid energy balance       : 149.73 kWh
+  average daily import          : 48.30 kWh
+  highest daily import          : 63.60 kWh
+
+DAILY PERFORMANCE
+  days in period                : 31
+  intervals per full day        : 288
+  partial days                  : 0
+  average daily revenue         : $2.3468
+  median daily revenue          : $2.2268
+  highest day                   : 2026-08-27  $6.3020
+  lowest day                    : 2026-08-18  $0.7220
+  max rolling 24-hour revenue   : $7.2498
+  min rolling 24-hour revenue   : $0.0212
+  (day basis = calendar; rolling 24h = 288 consecutive intervals)
+
+OPTIMISATION DIAGNOSTICS
+  solver                        : scipy.optimize.milp / HiGHS (MILP, no-simultaneity enforced)
+  solver status                 : 0 (Optimization terminated successfully. (HiGHS Status 7: Optimal))
+  objective value               : $-72.751399
+  optimiser runtime             : 1.274 s
+  number of intervals           : 8928
+  number of variables           : 35713
+  equality constraints          : 8928
+  inequality constraints        : 17856
+  binary variables              : 8928
+  no-simultaneity enforced      : True
+  simultaneous intervals        : 0
+  max power-bound violation     : 1.421e-14 kW
+  missing intervals             : 0
+  optimality proven (gap<=target): True
+  MIP gap (HiGHS report)        : 0.000048
+  MIP dual bound (objective)    : -72.754860
+  branch-and-bound nodes        : 1
+  constraint violations         : 0
+  independent validation        : PASSED
+
+OPTIMALITY CERTIFICATE
+  MILP objective (this run)     : $72.751399
+  LP relaxation upper bound     : $72.756549
+  MILP gap vs LP bound          : $0.005150  (0.007078%)
+  bound check                   : PASSED (MILP <= LP bound)
+==============================================================================
